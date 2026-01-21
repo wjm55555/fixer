@@ -1,0 +1,34 @@
+name: core-smoke
+
+on:
+  push:
+    paths:
+      - "src/**"
+      - "examples/**"
+      - "fixtures/**"
+      - "package.json"
+      - "tsconfig.json"
+      - ".github/workflows/core-smoke.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "examples/**"
+      - "fixtures/**"
+      - "package.json"
+      - "tsconfig.json"
+      - ".github/workflows/core-smoke.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.5"
+      - name: Install
+        run: bun install
+      - name: Core smoke
+        run: bun run smoke -- fixtures/rust-sample

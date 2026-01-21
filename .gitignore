@@ -1,0 +1,8 @@
+node_modules/
+outputs/
+**/target/
+.opencode/
+.opencode-cache/
+.opencode-config/
+.opencode-data/
+.opencode-state/

@@ -1,0 +1,15 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "opencode-rust-fix",
+      "dependencies": {
+        "@opencode-ai/core": "file:../opencode-dev/packages/opencode-core",
+      },
+    },
+  },
+  "packages": {
+    "@opencode-ai/core": ["@opencode-ai/core@file:../opencode-dev/packages/opencode-core", {}],
+  }
+}

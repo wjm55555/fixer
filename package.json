@@ -1,0 +1,14 @@
+{
+  "name": "opencode-rust-fix",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "smoke": "bun run examples/core-smoke/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opencode-ai/core": "file:../opencode-dev/packages/opencode-core"
+  }
+}
