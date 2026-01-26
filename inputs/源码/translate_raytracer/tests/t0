@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -x
+
+BASEDIR=$(dirname $(realpath "$0"))
+
+"$1" ${BASEDIR}/scene.txt && cmp ${BASEDIR}/reference_output.bmp out.bmp

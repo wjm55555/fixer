@@ -6,7 +6,7 @@ if (!workspaceDir || !outputDir) {
   process.exit(1)
 }
 
-const maxIterations = Number(process.env.FIXER_MAX_ITERATIONS ?? "6")
+const maxIterations = Number(process.env.FIXER_MAX_ITERATIONS ?? "35")
 const requireCargoTest = process.env.FIXER_REQUIRE_TESTS === "1"
 
 const result = await repairRustProject({
@@ -14,7 +14,7 @@ const result = await repairRustProject({
   outputDir,
   sourceDir,
   constraints: {
-    maxIterations: Number.isFinite(maxIterations) && maxIterations > 0 ? maxIterations : 6,
+    maxIterations: Number.isFinite(maxIterations) && maxIterations > 0 ? maxIterations : 20,
     requireCargoTest,
   },
 })
@@ -35,3 +35,6 @@ if (printResult) {
     ),
   )
 }
+
+// Ensure the CLI exits even if background handles remain.
+process.exit(result.status === "success" ? 0 : 2)

@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -x
+set -e
+
+o=$(printf "^abcdef$" | md5sum)
+s=$(printf "^abcdef$" | "$1")
+! [ "$s" == "$o"* ]

@@ -32,6 +32,77 @@ type CargoMessage = {
   }
 }
 
+function extractTextFromParts(parts: any[]): string {
+  return parts
+    .filter((part) => part && part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+    .trim()
+}
+
+function extractResponseText(parts: any[]): string | null {
+  const textPart = [...parts].reverse().find((part) => part?.type === "text" && typeof part.text === "string")
+  if (textPart) return textPart.text
+  const reasoningPart = [...parts].reverse().find((part) => part?.type === "reasoning")
+  if (reasoningPart) return null
+  const toolParts = parts.filter((part) => part?.type === "tool" && part?.state?.status === "completed")
+  if (toolParts.length > 0) return null
+  return null
+}
+
+function describePartTypes(parts: any[]) {
+  if (!Array.isArray(parts) || parts.length === 0) return "none"
+  return parts.map((part) => (part && part.type ? part.type : "unknown")).join(", ")
+}
+
+function deriveFixPlan(diagnostics: Diagnostic[]) {
+  const items = new Set<string>()
+  const add = (text: string) => {
+    if (text) items.add(text)
+  }
+  const addByCode = (code?: string | null) => {
+    switch (code) {
+      case "E0106":
+        add("补齐生命周期标注（返回引用与参数绑定）")
+        break
+      case "E0308":
+        add("修正类型不匹配（Box/Option/引用层级）")
+        break
+      case "E0499":
+      case "E0502":
+      case "E0506":
+        add("重构借用范围，避免同时可变/不可变借用")
+        break
+      case "E0599":
+        add("修正函数指针/字段调用语法")
+        break
+      case "E0133":
+        add("为 unsafe 函数调用添加 unsafe 块")
+        break
+      case "E0061":
+        add("修正函数参数数量/顺序")
+        break
+      default:
+        break
+    }
+  }
+  for (const diag of diagnostics) {
+    for (const msg of diag.json ?? []) {
+      const code = msg.message?.code?.code ?? null
+      if (code) addByCode(code)
+      const text = msg.message?.message ?? ""
+      if (text.includes("expected identifier") && text.includes("keyword")) {
+        add("重命名关键字冲突的标识符")
+      }
+    }
+    const stderr = diag.stderr ?? ""
+    if (stderr.includes("expected identifier") && stderr.includes("keyword")) {
+      add("重命名关键字冲突的标识符")
+    }
+  }
+  return Array.from(items)
+}
+
 function buildPermissionRules(
   outputDir: string,
   sourceDir?: string,
@@ -191,7 +262,7 @@ async function collectErrorSnippets(
 
 const SHOW_CHAT = process.env.FIXER_SHOW_CHAT !== "0"
 const SHOW_CHAT_FULL = process.env.FIXER_SHOW_CHAT_FULL === "1"
-const SHOW_CHAT_SUMMARY = process.env.FIXER_SHOW_CHAT_SUMMARY !== "0"
+const SHOW_CHAT_SUMMARY = process.env.FIXER_SHOW_CHAT_SUMMARY === "1"
 const SHOW_TOOL_OUTPUT = process.env.FIXER_SHOW_TOOL_OUTPUT === "1"
 const CORE_LOGS = process.env.FIXER_CORE_LOGS === "1"
 const CORE_LOG_LEVEL =
@@ -202,21 +273,34 @@ function truncateText(text: string, max = 1200) {
   return text.slice(0, max) + "…"
 }
 
+function displayPath(value: string) {
+  const rel = path.relative(process.cwd(), value)
+  if (rel && !rel.startsWith("..") && rel !== value) return rel
+  return path.basename(value)
+}
+
 function summarizeToolInput(input: Record<string, any>) {
-  if (!input) return "input={}"
-  const offset = typeof input.offset === "number" ? `偏移=${input.offset}` : ""
-  const limit = typeof input.limit === "number" ? `长度=${input.limit}` : ""
-  const range = [offset, limit].filter(Boolean).join(" ")
-  if (typeof input.path === "string") return range ? `path=${input.path} ${range}` : `path=${input.path}`
-  if (typeof input.filePath === "string") {
-    return range ? `path=${input.filePath} ${range}` : `path=${input.filePath}`
+  if (!input) return ""
+  const offset = typeof input.offset === "number" ? input.offset : null
+  const limit = typeof input.limit === "number" ? input.limit : null
+  const range =
+    offset !== null && limit !== null
+      ? `行${offset + 1}-${offset + limit}`
+      : offset !== null
+        ? `行${offset + 1}+`
+        : ""
+  if (typeof input.path === "string") {
+    return range ? `${displayPath(input.path)} ${range}` : displayPath(input.path)
   }
-  if (typeof input.file === "string") return `file=${input.file}`
-  if (typeof input.pattern === "string") return `pattern=${input.pattern}`
-  if (Array.isArray(input.paths)) return `paths=${input.paths.join(", ")}`
+  if (typeof input.filePath === "string") {
+    return range ? `${displayPath(input.filePath)} ${range}` : displayPath(input.filePath)
+  }
+  if (typeof input.file === "string") return displayPath(input.file)
+  if (typeof input.pattern === "string") return `pattern=${truncateText(input.pattern, 120)}`
+  if (Array.isArray(input.paths)) return `paths=${input.paths.map((p) => displayPath(p)).join(", ")}`
   if (range) return range
   const raw = JSON.stringify(input)
-  return `input=${truncateText(raw, 200)}`
+  return raw === "{}" ? "" : `input=${truncateText(raw, 200)}`
 }
 
 type SessionSummary = {
@@ -244,11 +328,13 @@ function emptySummary(): SessionSummary {
 function recordSummary(summary: SessionSummary, tool: string, input: Record<string, any>) {
   const name = tool.toLowerCase()
   const paths: string[] = []
-  if (typeof input.path === "string") paths.push(input.path)
-  if (typeof input.filePath === "string") paths.push(input.filePath)
-  if (typeof input.file === "string") paths.push(input.file)
-  if (Array.isArray(input.paths)) paths.push(...input.paths.filter((p) => typeof p === "string"))
-  if (typeof input.pattern === "string") paths.push(input.pattern)
+  if (typeof input.path === "string") paths.push(displayPath(input.path))
+  if (typeof input.filePath === "string") paths.push(displayPath(input.filePath))
+  if (typeof input.file === "string") paths.push(displayPath(input.file))
+  if (Array.isArray(input.paths)) {
+    paths.push(...input.paths.filter((p) => typeof p === "string").map((p) => displayPath(p)))
+  }
+  if (typeof input.pattern === "string") paths.push(truncateText(input.pattern, 120))
 
   if (name === "read") paths.forEach((p) => summary.reads.add(p))
   else if (name === "write") paths.forEach((p) => summary.writes.add(p))
@@ -263,21 +349,83 @@ function recordSummary(summary: SessionSummary, tool: string, input: Record<stri
 
 function formatSummary(summary: SessionSummary) {
   const formatSet = (set: Set<string>) => {
-    if (set.size === 0) return "(none)"
-    return Array.from(set).slice(0, 12).join(", ") + (set.size > 12 ? "…" : "")
+    if (set.size === 0) return ""
+    return Array.from(set).slice(0, 8).join(", ") + (set.size > 8 ? " …" : "")
   }
-  console.log("本轮操作摘要：")
-  console.log(`- 读取: ${formatSet(summary.reads)}`)
-  console.log(`- 写入: ${formatSet(summary.writes)}`)
-  console.log(`- 修改: ${formatSet(summary.edits)}`)
-  console.log(`- 补丁: ${formatSet(summary.patches)}`)
-  console.log(`- 列表: ${formatSet(summary.lists)}`)
-  console.log(`- 搜索: ${formatSet(summary.greps)}`)
-  console.log(`- 匹配: ${formatSet(summary.globs)}`)
+  const sections: Array<[string, string, Set<string>]> = [
+    ["读取", "👀", summary.reads],
+    ["写入", "💾", summary.writes],
+    ["修改", "🔧", summary.edits],
+    ["补丁", "🧩", summary.patches],
+    ["列表", "📋", summary.lists],
+    ["搜索", "🔍", summary.greps],
+    ["匹配", "🧭", summary.globs],
+  ]
+  const active = sections.filter(([, , set]) => set.size > 0)
+  if (active.length === 0) {
+    console.log("🤔 本轮没有可展示的工具操作，我会继续处理。")
+    return
+  }
+  const counts = active.map(([label, , set]) => `${label}${set.size}个`)
+  console.log(`🔧 本轮完成：${counts.join("，")}`)
+  const files = active.flatMap(([, , set]) => Array.from(set))
+  const uniqueFiles = Array.from(new Set(files))
+  const listing = uniqueFiles.slice(0, 8).join(", ") + (uniqueFiles.length > 8 ? " …" : "")
+  if (listing) {
+    console.log(`📄 涉及文件：${listing}`)
+  }
 }
 
 function summaryHasChanges(summary: SessionSummary) {
   return summary.edits.size > 0 || summary.writes.size > 0 || summary.patches.size > 0
+}
+
+function summaryHasToolOps(summary: SessionSummary) {
+  return (
+    summary.reads.size > 0 ||
+    summary.writes.size > 0 ||
+    summary.edits.size > 0 ||
+    summary.patches.size > 0 ||
+    summary.lists.size > 0 ||
+    summary.greps.size > 0 ||
+    summary.globs.size > 0
+  )
+}
+
+function formatChangedFilesForDisplay(files: string[], outputDir: string) {
+  const ignoreTokens = ["/target/", "/.fixer/", "/.opencode/", "/.git/"]
+  const ignoreNames = new Set([
+    "Cargo.lock",
+    "check.log",
+    "fmt.log",
+    "test.log",
+    "opencode.json",
+    "CACHEDIR.TAG",
+    ".rustc_info.json",
+    ".cargo-lock",
+  ])
+  const filtered = files
+    .map((file) => {
+      let value = file.replace(/^a\//, "").replace(/^b\//, "")
+      value = value.replace(/^"+|"+$/g, "")
+      if (value.startsWith(outputDir)) value = value.slice(outputDir.length + 1)
+      return value
+    })
+    .filter((value) => {
+      if (ignoreTokens.some((token) => value.includes(token))) return false
+      const name = value.split("/").pop() ?? value
+      if (ignoreNames.has(name)) return false
+      if (name.startsWith("iter-") && name.endsWith(".diff")) return false
+      if (name.startsWith("dep-")) return false
+      if (name.endsWith(".rmeta") || name.endsWith(".d") || name.endsWith(".json")) return false
+      if (name.endsWith(".timestamp")) return false
+      return true
+    })
+    .map((value) => displayPath(value))
+  if (filtered.length === 0) return ""
+  const shown = filtered.slice(0, 6)
+  const suffix = filtered.length > shown.length ? ` 等${filtered.length}个` : ""
+  return `${shown.join(", ")}${suffix}`
 }
 
 async function collectSessionSummaryRange(sessionID: string, startIndex = 0) {
@@ -302,13 +450,18 @@ async function collectSessionSummary(sessionID: string) {
   return result.summary
 }
 
-function createStreamLogger(sessionRef: () => string | null, iteration: number) {
+function createStreamLogger(
+  sessionRef: () => string | null,
+  iteration: number,
+  shouldLog?: () => boolean,
+) {
   let started = false
   const lastToolStatus = new Map<string, string>()
   const textLengths = new Map<string, number>()
   const messageRoles = new Map<string, string>()
   const startedMessages = new Set<string>()
   let assistantReady = false
+  let sawAssistantText = false
   const toolCounts = new Map<string, { label: string; detail: string; count: number }>()
 
   const ensureHeader = () => {
@@ -354,6 +507,28 @@ function createStreamLogger(sessionRef: () => string | null, iteration: number) 
     }
   }
 
+  const toolIcon = (tool: string) => {
+    switch (tool.toLowerCase()) {
+      case "read":
+        return "👀 "
+      case "write":
+        return "💾 "
+      case "edit":
+        return "🔧 "
+      case "patch":
+      case "apply_patch":
+        return "🧩 "
+      case "list":
+        return "📋 "
+      case "grep":
+        return "🔍 "
+      case "glob":
+        return "🧭 "
+      default:
+        return ""
+    }
+  }
+
   const toolKey = (tool: string, input: Record<string, any>) => {
     const name = tool.toLowerCase()
     const path =
@@ -387,6 +562,7 @@ function createStreamLogger(sessionRef: () => string | null, iteration: number) 
     const text = typeof part?.text === "string" ? part.text : ""
     const prev = textLengths.get(part.id) ?? 0
     if (text.length > prev) {
+      sawAssistantText = true
       ensureHeader()
       if (!startedMessages.has(part.messageID)) {
         startedMessages.add(part.messageID)
@@ -397,6 +573,7 @@ function createStreamLogger(sessionRef: () => string | null, iteration: number) 
       return
     }
     if (delta) {
+      sawAssistantText = true
       ensureHeader()
       if (!startedMessages.has(part.messageID)) {
         startedMessages.add(part.messageID)
@@ -405,6 +582,8 @@ function createStreamLogger(sessionRef: () => string | null, iteration: number) 
       process.stdout.write(delta)
     }
   }
+
+  const assistantAnnounced = new Set<string>()
 
   const writeTool = (part: any) => {
     const status = part?.state?.status ?? "unknown"
@@ -417,16 +596,30 @@ function createStreamLogger(sessionRef: () => string | null, iteration: number) 
     const tool = part?.tool ?? "工具"
     const { show, label, detail } = shouldShowTool(tool, input)
     if (!show && status !== "error") return
-    process.stdout.write(`\n操作：${label}（${statusLabel(status)}）${detail ? " " + detail : ""}\n`)
+    const icon = toolIcon(tool)
+    const messageID = part?.messageID ?? "unknown"
+    if (!startedMessages.has(messageID) && !assistantAnnounced.has(messageID)) {
+      assistantAnnounced.add(messageID)
+      const line = detail ? `${label} ${detail}` : label
+      process.stdout.write(`\n助手：正在执行 ${line}\n`)
+    }
+    process.stdout.write(
+      `\n操作：${icon}${label}（${statusLabel(status)}）${detail ? " " + detail : ""}\n`,
+    )
   }
 
   const writePatch = (part: any) => {
     const files = Array.isArray(part?.files) ? part.files.join(", ") : ""
     ensureHeader()
+    if (!sawAssistantText) {
+      process.stdout.write("\n助手：正在应用补丁\n")
+      sawAssistantText = true
+    }
     process.stdout.write(`\n操作：应用补丁 ${files}\n`)
   }
 
   const onEvent = (event: { type: string; properties: Record<string, any> }) => {
+    if (shouldLog && !shouldLog()) return
     if (event.type === "session.compacted") return
     if (event.type === "message.updated") {
       const info = event.properties?.info
@@ -453,17 +646,9 @@ function createStreamLogger(sessionRef: () => string | null, iteration: number) 
 
   const finish = () => {
     if (started) process.stdout.write("\n")
-    const collapsed = Array.from(toolCounts.values()).filter((entry) => entry.count > 1)
-    if (collapsed.length > 0) {
-      console.log("提示：以下重复操作已折叠：")
-      for (const entry of collapsed) {
-        const detail = entry.detail ? ` ${entry.detail}` : ""
-        console.log(`- ${entry.label}${detail} ×${entry.count}`)
-      }
-    }
   }
 
-  return { onEvent, finish }
+  return { onEvent, finish, getHasText: () => sawAssistantText }
 }
 
 async function printSessionTranscript(sessionID: string, iteration: number, userPrompt: string) {
@@ -516,7 +701,7 @@ async function resolveCargoWorkspaceRoot(root: string) {
   try {
     const stat = await fs.stat(manifest)
     if (stat.isFile()) return resolved
-  } catch {}
+  } catch { }
 
   const entries = await fs.readdir(resolved, { withFileTypes: true })
   const candidates: string[] = []
@@ -529,7 +714,7 @@ async function resolveCargoWorkspaceRoot(root: string) {
       if (stat.isFile()) {
         candidates.push(path.dirname(candidate))
       }
-    } catch {}
+    } catch { }
   }
   if (candidates.length === 1) return candidates[0]
   return resolved
@@ -561,6 +746,9 @@ async function runCargo(
   maxLogBytes?: number,
   jsonOutput?: boolean,
 ) {
+  if (SHOW_CHAT) {
+    console.log(`⏳ 正在运行 cargo ${args.join(" ")}`)
+  }
   const command = ["cargo", ...args]
   if (jsonOutput && !command.includes("--message-format=json")) {
     command.push("--message-format=json")
@@ -574,6 +762,10 @@ async function runCargo(
     timeoutMs: 15 * 60 * 1000,
     maxOutputBytes: 2_000_000,
   })
+  if (SHOW_CHAT) {
+    const icon = result.code === 0 ? "✅" : "❌"
+    console.log(`${icon} cargo ${args.join(" ")} 结束（exit=${result.code}）`)
+  }
   const combined = result.stdout + "\n" + result.stderr
   await writeLog(logsDir, `${kind}.log`, combined, maxLogBytes)
   const json = parseCargoMessages(result.stdout)
@@ -1148,8 +1340,21 @@ async function llmFixStep(input: {
   sessionID?: string | null
   lastChangedFiles?: string[]
   lastDiffSnippet?: string | null
+  lastAgentError?: string | null
 }) {
   const fixed = await loadFixedProviderConfig()
+  const modelRef = (() => {
+    const raw = typeof fixed.config?.model === "string" ? fixed.config.model : undefined
+    if (!raw || !raw.includes("/")) return undefined
+    const [providerID, ...rest] = raw.split("/")
+    const modelID = rest.join("/")
+    if (!providerID || !modelID) return undefined
+    return { providerID, modelID }
+  })()
+  const fallbackModelIDs = ["qwen3-max"]
+  const fallbackModels = modelRef
+    ? fallbackModelIDs.map((modelID) => ({ providerID: modelRef.providerID, modelID }))
+    : []
   const promptDiagnostics = selectDiagnosticsForPrompt(input.diagnostics)
   const snippets = await collectErrorSnippets(input.outputDir, promptDiagnostics)
   const system = [
@@ -1163,6 +1368,7 @@ async function llmFixStep(input: {
     "For Box/Option mismatches, unwrap or remove Box::new to match the signature.",
     "For borrow checker errors, restructure with take/replace or narrower borrows.",
     "If rustc provides a help suggestion, apply it directly unless it would break compilation.",
+    "If a refactor or behavior is unclear, consult the C source reference when available (not mandatory).",
     "Respond in Chinese with a human-readable, concise status update.",
   ].join("\n")
 
@@ -1170,6 +1376,7 @@ async function llmFixStep(input: {
     `Workspace: ${input.outputDir}`,
     input.sourceDir ? `Source (C) reference: ${input.sourceDir}` : undefined,
     `Iteration: ${input.iteration}`,
+    input.lastAgentError ? `Previous agent error: ${input.lastAgentError}` : undefined,
     "",
     "Diagnostics:",
     summarizeDiagnostics(promptDiagnostics),
@@ -1196,7 +1403,61 @@ async function llmFixStep(input: {
       .join("\n")
 
   let activeSessionID: string | null = input.sessionID ?? null
-  const stream = createStreamLogger(() => activeSessionID, input.iteration)
+  let streamPaused = false
+  const stream = createStreamLogger(() => activeSessionID, input.iteration, () => !streamPaused)
+
+  const isRetryableAgentError = (error: unknown) => {
+    const message =
+      error instanceof Error ? error.message : typeof error === "string" ? error : JSON.stringify(error)
+    return (
+      message.includes("AI_RetryError") ||
+      message.includes("No response") ||
+      message.includes("模型无返回结果") ||
+      message.includes("负载较高") ||
+      message.includes("load") ||
+      message.includes("timeout")
+    )
+  }
+
+  const promptWithRetry = async (
+    promptInput: Parameters<typeof Core.SessionPrompt.prompt>[0],
+    purpose: string,
+  ) => {
+    const tryPrompt = async (modelOverride?: { providerID: string; modelID: string }) => {
+      const result = await Core.SessionPrompt.prompt({
+        ...promptInput,
+        model: modelOverride ?? promptInput.model,
+      })
+      if (result?.info?.role === "assistant" && result?.info?.error) {
+        console.error("Agent error:", result.info.error)
+        const err = result.info.error as {
+          name?: string
+          message?: string
+          data?: { message?: string }
+        }
+        const detail = err?.message ?? err?.data?.message ?? JSON.stringify(err)
+        throw new Error(`${err?.name ?? "AgentError"}: ${detail ?? ""}`)
+      }
+      return result
+    }
+
+    try {
+      return await tryPrompt(promptInput.model)
+    } catch (error) {
+      if (!isRetryableAgentError(error) || fallbackModels.length === 0) throw error
+      for (const fallback of fallbackModels) {
+        console.log(`⚠️ 原模型无响应，临时切换到 ${fallback.modelID} 继续${purpose}…`)
+        try {
+          const result = await tryPrompt(fallback)
+          console.log("✅ 临时模型成功，已切回原模型。")
+          return result
+        } catch (fallbackError) {
+          if (!isRetryableAgentError(fallbackError)) throw fallbackError
+        }
+      }
+      throw error
+    }
+  }
 
   await withCore(
     {
@@ -1214,20 +1475,59 @@ async function llmFixStep(input: {
       }
       const beforeMessages = await Core.Session.messages({ sessionID: activeSessionID! })
       const beforeCount = Array.isArray(beforeMessages) ? beforeMessages.length : 0
-      await Core.SessionPrompt.prompt({
-        sessionID: activeSessionID!,
-        agent: "build",
-        system,
-        parts: [
+      const result = await promptWithRetry(
+        {
+          sessionID: activeSessionID!,
+          model: modelRef,
+          agent: "build",
+          system,
+          parts: [
+            {
+              type: "text",
+              text: user,
+            },
+          ],
+        },
+        "修复",
+      )
+      const responseText = extractResponseText(result?.parts ?? [])
+      let requestedSummary = false
+      if (!responseText) requestedSummary = true
+      if (requestedSummary) {
+        console.log("Requesting summary from agent...")
+        streamPaused = true
+        const summaryMessage = await promptWithRetry(
           {
-            type: "text",
-            text: user,
+            sessionID: activeSessionID!,
+            model: modelRef,
+            tools: { "*": false },
+            parts: [
+              {
+                type: "text",
+                text: "请用1-2句简要总结你刚刚做了哪些修复，以及下一步要做什么。",
+              },
+            ],
           },
-        ],
-      })
+          "生成总结",
+        )
+        streamPaused = false
+        const summaryParts = summaryMessage?.parts ?? []
+        const summaryText = extractResponseText(summaryParts)
+        if (summaryText) console.log(summaryText)
+        else {
+          throw new Error(
+            `Failed to get summary from agent (parts: ${describePartTypes(summaryParts)})`,
+          )
+        }
+      }
       stream.finish()
       let summaryResult = await collectSessionSummaryRange(activeSessionID!, beforeCount)
+      let askedFollowup = false
       if (!summaryHasChanges(summaryResult.summary)) {
+        askedFollowup = true
+        if (SHOW_CHAT_SUMMARY || SHOW_CHAT) {
+          console.log("⚠️ 本轮未产生修改，已再次向模型发起追问。")
+        }
         await Core.SessionPrompt.prompt({
           sessionID: activeSessionID!,
           agent: "build",
@@ -1245,8 +1545,14 @@ async function llmFixStep(input: {
         await printSessionTranscript(activeSessionID!, input.iteration, user)
       } else if (SHOW_CHAT_SUMMARY) {
         formatSummary(summaryResult.summary)
+        if (!summaryHasToolOps(summaryResult.summary)) {
+          console.log("🤔 模型本轮未调用任何工具，因此没有实际修改。")
+        }
         if (!summaryHasChanges(summaryResult.summary)) {
-          console.log("提示：本轮没有修改任何文件，修复未推进。")
+          console.log("🤔 本轮没有实际修改，我会继续尝试。")
+          if (askedFollowup) {
+            console.log("⚠️ 追问后仍无修改，可能需要更明确的上下文或改用 apply_patch。")
+          }
         }
       }
     },
@@ -1289,6 +1595,7 @@ export async function repairRustProject(input: RepairInput): Promise<RepairResul
   }
   let noProgressCount = 0
   let sessionID: string | null = null
+  let lastAgentError: string | null = null
   let lastChangedFiles: string[] = []
   let lastDiffSnippet: string | null = null
 
@@ -1307,18 +1614,26 @@ export async function repairRustProject(input: RepairInput): Promise<RepairResul
   while (diagnostics.at(-1)?.code !== 0 && metrics.iterations < maxIterations) {
     if (constraints.timeBudgetMs && Date.now() - startedAt > constraints.timeBudgetMs) break
     metrics.iterations += 1
-    sessionID = await llmFixStep({
-      outputDir: input.outputDir,
-      sourceDir: input.sourceDir,
-      diagnostics,
-      logsDir: artifacts.logsDir!,
-      iteration: metrics.iterations,
-      policy,
-      lastIterationNoChange: noProgressCount > 0,
-      sessionID,
-      lastChangedFiles,
-      lastDiffSnippet,
-    })
+    try {
+      sessionID = await llmFixStep({
+        outputDir: input.outputDir,
+        sourceDir: input.sourceDir,
+        diagnostics,
+        logsDir: artifacts.logsDir!,
+        iteration: metrics.iterations,
+        policy,
+        lastIterationNoChange: noProgressCount > 0,
+        sessionID,
+        lastChangedFiles,
+        lastDiffSnippet,
+        lastAgentError,
+      })
+      lastAgentError = null
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`Agent error (continuing): ${message}`)
+      lastAgentError = message
+    }
     diagnostics.push(
       ...(await runWorkspaceChecks(input.outputDir, policy, artifacts.logsDir!, maxLogBytes)),
     )
@@ -1329,19 +1644,21 @@ export async function repairRustProject(input: RepairInput): Promise<RepairResul
     await writePatch(artifacts.patchesDir!, `iter-${metrics.iterations}`, iterDiff.diff, artifacts.patches)
     lastChangedFiles = iterDiff.changedFiles
     lastDiffSnippet = iterDiff.diff.length > 2000 ? iterDiff.diff.slice(0, 2000) + "\n...(truncated)" : iterDiff.diff
-    if (iterDiff.changedFiles.length === 0) {
-      noProgressCount += 1
-      if (SHOW_CHAT) {
-        console.log("提示：本轮未产生实际改动。")
+    if (SHOW_CHAT_SUMMARY) {
+      if (iterDiff.changedFiles.length === 0) {
+        noProgressCount += 1
+        console.log("🤔 本轮未产生实际改动。")
+      } else {
+        noProgressCount = 0
+        const display = formatChangedFilesForDisplay(iterDiff.changedFiles, input.outputDir)
+        if (display) {
+          console.log(`🔧 本轮改动：${display}`)
+        }
       }
+    } else if (iterDiff.changedFiles.length === 0) {
+      noProgressCount += 1
     } else {
       noProgressCount = 0
-      if (SHOW_CHAT) {
-        const pretty = iterDiff.changedFiles.map((file) =>
-          file.startsWith(input.outputDir) ? file.slice(input.outputDir.length + 1) : file,
-        )
-        console.log(`本轮实际改动文件：${pretty.join(", ")}`)
-      }
     }
     if (maxWorkspaceBytes) {
       const size = await dirSizeBytes(input.outputDir, new Set([".fixer"]))
@@ -1366,6 +1683,32 @@ export async function repairRustProject(input: RepairInput): Promise<RepairResul
   const { diff, changedFiles } = diffResult
 
   const status = metrics.cargoCheckPass && metrics.cargoTestPass ? "success" : metrics.cargoCheckPass ? "partial" : "failed"
+
+  if (SHOW_CHAT) {
+    const displayFiles = formatChangedFilesForDisplay(changedFiles, input.outputDir)
+    if (status === "success") {
+      const testMsg = shouldRunTests
+        ? metrics.cargoTestPass
+          ? "✅ 测试通过"
+          : "⚠️ 测试未通过"
+        : "⏭️ 本次未运行测试"
+      console.log("✅ 修复完成：cargo check 通过")
+      console.log(testMsg)
+      if (displayFiles) {
+        console.log(`🔧 主要修改：${displayFiles}`)
+      }
+    } else if (status === "partial") {
+      console.log("⚠️ 修复完成：cargo check 通过，但测试未通过")
+      if (displayFiles) {
+        console.log(`🔧 主要修改：${displayFiles}`)
+      }
+    } else {
+      console.log("❌ 修复未完成：cargo check 仍失败")
+      if (displayFiles) {
+        console.log(`🔧 已修改：${displayFiles}`)
+      }
+    }
+  }
 
   return {
     status,

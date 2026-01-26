@@ -18,9 +18,29 @@ function parseValue(pattern: RegExp, content: string, label: string) {
 export async function loadFixedProviderConfig(): Promise<FixedProviderConfig> {
   const content = await fs.readFile(API_FILE, "utf8")
   const baseUrl = parseValue(/base_url\s*=\s*"([^"]+)"/i, content, "base_url")
-  const model = parseValue(/模型为\s*([\w.-]+)/i, content, "model")
+  const originalModel = parseValue(/模型为\s*([\w.-]+)/i, content, "model")
   const apiKey = parseValue(/API_KEY\s*:\s*([^\s]+)/i, content, "API_KEY")
   const providerID = "privatemode-ai"
+  const model = originalModel
+  const fallbackModels = ["qwen3-max"]
+  const models: Record<string, any> = {}
+  const registerModel = (name: string) => {
+    if (models[name]) return
+    models[name] = {
+      id: name,
+      name,
+      temperature: true,
+      reasoning: true,
+      tool_call: true,
+      attachment: false,
+      modalities: { input: ["text"], output: ["text"] },
+      limit: { context: 198000, output: 16000 },
+    }
+  }
+  registerModel(model)
+  for (const fallback of fallbackModels) {
+    registerModel(fallback)
+  }
 
   return {
     model,
@@ -32,19 +52,9 @@ export async function loadFixedProviderConfig(): Promise<FixedProviderConfig> {
           options: {
             apiKey,
             baseURL: baseUrl,
+            extraBody: { enable_thinking: false },
           },
-          models: {
-            [model]: {
-              id: model,
-              name: model,
-              temperature: true,
-              reasoning: true,
-              tool_call: true,
-              attachment: false,
-              modalities: { input: ["text"], output: ["text"] },
-              limit: { context: 200000, output: 32000 },
-            },
-          },
+          models,
         },
       },
     },

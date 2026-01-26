@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -x
+
+BASEDIR=$(dirname $(realpath $0))
+
+pushd ${BASEDIR}/src
+
+bear -- make && make clean
+
+popd

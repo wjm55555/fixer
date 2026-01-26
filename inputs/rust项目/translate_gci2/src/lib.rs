@@ -1,0 +1,12 @@
+pub mod allocator;
+pub mod ast;
+pub mod bytecode_generator;
+pub mod data_types;
+pub mod garbage_collector;
+pub mod lexer;
+pub mod parser;
+pub mod pos;
+pub mod ptrs_map;
+pub mod token;
+pub mod utils;
+pub mod virtual_machine;

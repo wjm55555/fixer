@@ -1,0 +1,12 @@
+[package]
+name = "translate_md5"
+version = "0.1.0"
+edition = "2021"
+
+
+[[bin]]
+name = "main"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"

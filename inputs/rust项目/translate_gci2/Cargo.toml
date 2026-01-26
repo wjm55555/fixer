@@ -1,0 +1,18 @@
+[package]
+name = "translate_gci"
+version = "0.1.0"
+edition = "2021"
+
+
+[[bin]]
+name = "tests"
+path = "src/tests.rs"
+
+[[bin]]
+name = "interpreter"
+path = "src/interpreter.rs"
+
+[dependencies]
+lazy_static = "1.4"
+libc = "0.2"
+

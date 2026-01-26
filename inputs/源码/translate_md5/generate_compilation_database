@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -x
+
+BASEDIR=$(dirname $(realpath $0))
+
+pushd ${BASEDIR}/src
+
+bear -- gcc md5.c main.c -o md5 && rm -f md5
+
+popd

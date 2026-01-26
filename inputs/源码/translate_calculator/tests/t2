@@ -1,0 +1,5 @@
+#!/bin/bash
+
+set -x
+
+"$1" "2^3" | grep "result: 8"

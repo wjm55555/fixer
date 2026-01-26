@@ -6,3 +6,4 @@ outputs/
 .opencode-config/
 .opencode-data/
 .opencode-state/
+.fixer/

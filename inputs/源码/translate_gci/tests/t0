@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -x
+
+BASEDIR=$(dirname $(realpath $0))
+
+"$1" -i ${BASEDIR}/inputs/00.js | grep "result: 55"

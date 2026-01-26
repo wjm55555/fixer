@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -x
+
+BASEDIR=$(dirname $(realpath $0))
+
+"$1" -i ${BASEDIR}/inputs/02.js | grep "result: 0"

@@ -1,0 +1,27 @@
+pub mod tests;
+pub mod bytecode_generator;
+pub mod allocator;
+pub mod garbage_collector;
+pub mod ptrs_map;
+pub mod lexer;
+pub mod pos;
+pub mod token;
+pub mod ast;
+pub mod parser;
+pub mod utils;
+pub mod virtual_machine;
+pub mod data_types;
+
+pub use tests::*;
+pub use bytecode_generator::*;
+pub use allocator::*;
+pub use garbage_collector::*;
+pub use ptrs_map::*;
+pub use lexer::*;
+pub use pos::*;
+pub use token::*;
+pub use ast::*;
+pub use parser::*;
+pub use utils::*;
+pub use virtual_machine::*;
+pub use data_types::*;
