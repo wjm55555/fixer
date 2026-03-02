@@ -1,0 +1,7 @@
+{
+  "providerID": "deepseek",
+  "model": "deepseek-chat",
+  "baseURL": "https://api.deepseek.com",
+  "apiKey": "sk-your-key-here",
+  "fallbackModels": ["deepseek-reasoner"]
+}

@@ -1,1 +1,1 @@
-opencode-dev: dev (set exact commit hash when syncing)
+vendored-opencode-runtime: snapshot-from-opencode-dev

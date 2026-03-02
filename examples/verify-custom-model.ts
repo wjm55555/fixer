@@ -1,5 +1,5 @@
 
-import { Core, withCore } from "@opencode-ai/core"
+import { Core, withCore } from "../src/core-runtime.ts"
 import { loadFixedProviderConfig } from "../src/fixed-provider.ts"
 
 const workspaceDir = process.cwd()
@@ -35,14 +35,13 @@ async function main() {
             })
 
             console.log("\nResponse from model:")
+            console.log("\nResponse from model:")
             if (result.parts) {
-                for (const part of result.parts) {
-                    if (part.type === 'text') {
-                        console.log(part.text)
-                    } else if (part.type === 'reasoning') {
-                        console.log("[REASONING]:", part.text)
-                    }
-                }
+                const text = result.parts
+                    .filter(p => p.type === 'text')
+                    .map(p => p.text)
+                    .join('')
+                console.log(text)
             } else {
                 console.log(JSON.stringify(result, null, 2))
             }

@@ -7,7 +7,11 @@ if (!workspaceDir || !outputDir) {
 }
 
 const maxIterations = Number(process.env.FIXER_MAX_ITERATIONS ?? "35")
-const requireCargoTest = process.env.FIXER_REQUIRE_TESTS === "1"
+const runTestsWhenCheckPass = process.env.FIXER_REQUIRE_TESTS !== "0"
+const testCases = (process.env.FIXER_TEST_CASES ?? "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean)
 
 const result = await repairRustProject({
   workspaceDir,
@@ -15,7 +19,8 @@ const result = await repairRustProject({
   sourceDir,
   constraints: {
     maxIterations: Number.isFinite(maxIterations) && maxIterations > 0 ? maxIterations : 20,
-    requireCargoTest,
+    runTestsWhenCheckPass,
+    testCases,
   },
 })
 

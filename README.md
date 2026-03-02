@@ -1,6 +1,6 @@
 # Rust Fixer Module
 
-This package is a headless repair module specialized for C→Rust translation projects. It accepts a source Rust workspace, an optional original C source directory for context, and an output directory. It runs deterministic checks (`cargo fmt/check/clippy`) and uses an LLM loop when needed to repair compile errors.
+This package is a headless repair module specialized for C→Rust translation projects. It accepts a source Rust workspace, an optional original C source directory for context, and an output directory. It runs deterministic checks (`cargo fmt/check/clippy`) and uses an LLM loop when needed to repair compile errors and failing tests.
 
 ## Quickstart
 ```ts
@@ -12,7 +12,8 @@ const result = await repairRustProject({
   outputDir: "/path/to/output",
   constraints: {
     maxIterations: 3,
-    requireCargoTest: false,
+    runTestsWhenCheckPass: true,
+    testCases: [], // optional: ["module::case_name"]
   },
 })
 ```
@@ -22,12 +23,15 @@ See:
 - `docs/api.md`
 - `docs/security.md`
 - `docs/troubleshooting.md`
+- `docs/python-integration-zh.md` (Python 调用说明，含函数/CLI/HTTP 三种方式)
 
 ## Inputs
 - `workspaceDir`: translated Rust project root (crate/workspace).
 - `sourceDir`: optional C source root for context.
 - `outputDir`: where fixes are applied; the module copies the workspace into this directory.
 - `constraints`: optional limits (iterations, time budget, allowed commands, size caps).
+  - `runTestsWhenCheckPass` defaults to `true`
+  - `testCases` optionally restricts `cargo test` to specific test names
 
 ## Outputs
 `RepairResult` includes:
@@ -44,5 +48,44 @@ See:
 - Workspace size can be capped via `constraints.maxWorkspaceBytes`.
 
 ## Fixed Provider
-Model configuration is read from:
-`/Users/wujiaming/Desktop/rust修复/api的key以及平台.md`
+Provider configuration loading order:
+1. Environment variables: `FIXER_BASE_URL`, `FIXER_API_KEY` (optional: `FIXER_MODEL`, `FIXER_PROVIDER_ID`, `FIXER_FALLBACK_MODELS`)
+2. `fixer/config/provider.local.json`
+3. `fixer/config/provider.json`
+
+Template:
+`fixer/config/provider.example.json`
+
+## Dependency note
+`fixer` can run standalone and no longer requires local `opencode-dev` runtime.
+The default runtime is vendored in `fixer/vendor/packages/*`.
+Set `FIXER_ENGINE=shim` only for fallback troubleshooting.
+
+## Python Bridge
+
+### TS bridge entry
+- CLI: `bun run src/python-bridge-cli.ts '<json_payload>'`
+- Output includes a marker line: `__FIXER_RESULT__{...json...}`
+
+### Python helper
+- File: `python/fixer_bridge.py`
+- Function: `repair_rust_project(...)`
+
+### Minimal HTTP service (for Python projects)
+- File: `python/fixer_service.py`
+- Start: `python3 python/fixer_service.py --host 127.0.0.1 --port 8787`
+- Health: `GET /health`
+- Repair: `POST /repair` (JSON body)
+
+Example request:
+```bash
+curl -sS http://127.0.0.1:8787/repair \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rustProjectDir": "/path/to/rust-project",
+    "outputRustProjectDir": "/path/to/output",
+    "sourceProjectDir": "/path/to/c-source",
+    "maxIterations": 0,
+    "runTestsWhenCheckPass": true
+  }'
+```

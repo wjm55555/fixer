@@ -2,6 +2,8 @@ export type RepairConstraints = {
   maxIterations?: number
   timeBudgetMs?: number
   requireCargoTest?: boolean
+  runTestsWhenCheckPass?: boolean
+  testCases?: string[]
   allowedCommands?: string[]
   maxLogBytes?: number
   maxWorkspaceBytes?: number

@@ -1,10 +1,9 @@
 # Troubleshooting
 
 ## Provider errors
-Ensure `/Users/wujiaming/Desktop/rust修复/api的key以及平台.md` exists and contains:
-- `base_url=...`
-- `模型为 ...`
-- `API_KEY:...`
+Ensure provider config is set by either:
+- environment variables: `FIXER_BASE_URL` and `FIXER_API_KEY`
+- or local file: `fixer/config/provider.local.json` (see `fixer/config/provider.example.json`)
 
 ## Cargo failures
 Inspect `.fixer/logs/check.log` and `.fixer/logs/clippy.log` in the output directory.

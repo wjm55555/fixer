@@ -7,3 +7,4 @@ outputs/
 .opencode-data/
 .opencode-state/
 .fixer/
+config/provider.local.json

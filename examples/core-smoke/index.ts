@@ -1,4 +1,4 @@
-import { Core, withCore } from "@opencode-ai/core"
+import { Core, withCore } from "../../src/core-runtime.ts"
 
 const workspaceDir = process.argv[2] ?? process.cwd()
 

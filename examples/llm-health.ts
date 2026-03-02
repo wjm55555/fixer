@@ -1,5 +1,5 @@
 import path from "path"
-import { withCore, Core } from "@opencode-ai/core"
+import { withCore, Core } from "../src/core-runtime.ts"
 import { loadFixedProviderConfig } from "../src/fixed-provider.ts"
 
 const workspaceDir = process.cwd()
